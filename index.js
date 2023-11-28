@@ -1,29 +1,33 @@
 import AWS from 'aws-sdk'
 import fetch from 'node-fetch';
+import { Storage } from '@google-cloud/storage'
 import Mailgun from 'mailgun.js';
 import formData from 'form-data'
 const mailgun = new Mailgun(formData);
 const s3 = new AWS.S3();
-const s3Bucket = 'demobucketsahithi'
-const mailgunApiKey = '1cbbf5398d1f07504fdce143074e1296-30b58138-110fb265';
-const mailgunDomain = 'csyenscc.me';
+
+//const GCPkeyFilePath = '/Users/sahithigaddam/Downloads/gcp-dev-406420-5a57742b000a.json';
+const gcsKey = process.env.GCP_KEY;
+const gcsbucketName = process.env.GCS_BUCKET_NAME;
+const mailgunApiKey = process.env.MAILGUN_API_KEY;
+const mailgunDomain = process.env.MAILGUN_DOMAIN;
+const tableName = process.env.DYNAMODB_NAME;
+
+
 
 AWS.config.update({region: 'us-west-1'});
 var docClient = new AWS.DynamoDB.DocumentClient();
-const tableName = 'demotable';
 
 export async function handler(event) {
     const snsMessage = JSON.parse(event.Records[0].Sns.Message)
     const { submissionUrl, userEmail } = snsMessage;
-    const s3Key = `documents/${userEmail}/example.txt`;
     try {
         const response = await fetch(submissionUrl);
         if (!response.ok) {
             throw new Error(`Failed to fetch file: ${response.statusText}`);
         }
         const fileBuffer = Buffer.from(await response.arrayBuffer());
-        await uploadToS3(s3Bucket, s3Key, fileBuffer);
-        console.log('File fetched and uploaded to S3 successfully.');
+        await uploadToGCS(fileBuffer);
         await sendEmail(userEmail, 'Download Status', 'The file has been successfully downloaded and stored in S3.');
         await trackSentEmail(userEmail);
         
@@ -33,14 +37,20 @@ export async function handler(event) {
     }
 }
 
-async function uploadToS3(bucket, key, data) {
-    await s3
-        .putObject({
-            Bucket: bucket,
-            Key: key,
-            Body: data,
-        })
-        .promise();
+async function uploadToGCS(data) {
+    try{
+        const storage = new Storage({
+            credentials: JSON.parse(gcsKey),
+          });
+        const bucket = storage.bucket(gcsbucketName);
+        const file = bucket.file('submission.zip');
+        await file.save(data, { contentType: 'text/plain' });
+        console.log('File uploaded to Google Cloud Storage successfully.');
+        return 'Success';
+        } catch (error) {
+            console.error('Error:', error.message);
+            throw new Error('Failed to process the Lambda function.');
+        }
 }
 
 async function sendEmail(to, subject, text) {
