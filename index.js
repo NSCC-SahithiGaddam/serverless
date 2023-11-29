@@ -10,11 +10,8 @@ const mailgunApiKey = process.env.MAILGUN_API_KEY;
 const mailgunDomain = process.env.MAILGUN_DOMAIN;
 const tableName = process.env.DYNAMODB_NAME;
 const keyBuffer = Buffer.from(gcsKey, 'base64');
-
-    // If the key is in JSON format, you can parse it
 const keyData = JSON.parse(keyBuffer.toString('utf-8'));
 console.log(keyData)
-
 AWS.config.update({region: 'us-west-1'});
 var docClient = new AWS.DynamoDB.DocumentClient();
 
@@ -23,13 +20,19 @@ export async function handler(event) {
     const { submissionUrl, userEmail } = snsMessage;
     try {
         const response = await fetch(submissionUrl);
+        let email_status = 'Failure'
+        let text = ''
         if (!response.ok) {
-            throw new Error(`Failed to fetch file: ${response.statusText}`);
+            text = `Failed to fetch file - Invalid Submission url ${submissionUrl}`
         }
-        const fileBuffer = Buffer.from(await response.arrayBuffer());
-        await uploadToGCS(fileBuffer, userEmail);
-        await sendEmail(userEmail, 'Download Status', `The file ${submissionUrl} has been successfully downloaded and stored in GCS.`);
-        await trackSentEmail(userEmail);
+        else{
+            const fileBuffer = Buffer.from(await response.arrayBuffer());
+            const filepath = await uploadToGCS(fileBuffer, userEmail);
+            email_status = 'Success'
+            text = `The file has been uploaded to GCS ${gcsbucketName}/${filepath}`
+        }
+        await sendEmail(userEmail, `Download Status - ${email_status}`, text);
+        await trackSentEmail(userEmail, email_status);
         
     }
     catch(ex){
@@ -43,10 +46,12 @@ async function uploadToGCS(data,userEmail) {
             credentials: keyData,
           });
         const bucket = storage.bucket(gcsbucketName);
-        const file = bucket.file(`${userEmail}/submission.zip`);
+        const timestamp = new Date().toISOString()
+        const filepath = `${userEmail}/${timestamp}_submission.zip`
+        const file = bucket.file(filepath);
         await file.save(data, { contentType: 'text/plain' });
         console.log('File uploaded to Google Cloud Storage successfully.');
-        return 'Success';
+        return filepath;
         } catch (error) {
             console.error('Error:', error.message);
             throw new Error('Failed to process the Lambda function.');
@@ -56,7 +61,7 @@ async function uploadToGCS(data,userEmail) {
 async function sendEmail(to, subject, text) {
     const mg = mailgun.client({username: 'api', key: mailgunApiKey});
     await mg.messages.create(mailgunDomain, {
-        from: 'postmaster@csyenscc.me',
+        from: 'sahithi@csyenscc.me',
         to: [to],
         subject: subject,
         text: text
@@ -65,12 +70,13 @@ async function sendEmail(to, subject, text) {
     .catch(err => console.log(err)); 
 }
 
-async function trackSentEmail(to) {
+async function trackSentEmail(to, email_status) {
     var params = {
         TableName: tableName,
         Item: {
           'UserEmail' : to,
-          'Timestamp' : new Date().toISOString()
+          'Timestamp' : new Date().toISOString(),
+          'Email Status' : email_status
         }
       };
 
