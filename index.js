@@ -23,7 +23,7 @@ export async function handler(event) {
         let email_status = 'Failure'
         let text = ''
         if (!response.ok) {
-            text = `Failed to fetch file - Invalid Submission url ${submissionUrl}`
+            text = `Failed to upload file to GCS - Submit valid assignment url`
         }
         else{
             const fileBuffer = Buffer.from(await response.arrayBuffer());
